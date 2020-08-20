@@ -30,6 +30,9 @@ TEST_F(BufferTest, test_add)
     auto *page = buffer.FetchPage(page_id);
 
     page->AddWord("ping-cap", 1);
+    std::string s = "ping-cap";
+    ASSERT_EQ(page->GetNumWord(), 1);
+    ASSERT_EQ(page->GetNextWordEnd(), PAGE_SIZE - PAGE_HEADER_SIZE - s.size() - sizeof(int));
     int id = -1;
 
     // Should exist with word_id = 1

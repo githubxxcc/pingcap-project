@@ -59,7 +59,7 @@ private:
     size_t mem_limit_;
     size_t num_buckets_;
     std::unordered_map<page_id_t, PageInfo> bucket_info_;
-    int next_word_id_ = 0;
+    int next_word_id_ = 1;
 };
 
 #endif //PINGCAP_INTERVIEW_FINDER_H
