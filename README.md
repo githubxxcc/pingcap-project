@@ -24,7 +24,7 @@ cd build && ./pingcap_interview ../test.txt
 
 ### Design
 由于内存限制（16G）比文本（100G）要小，所以一部分的数据必须得储存到disk上。
-数据将以一个1024KB的Page为单位被储存在内存或者硬盘上。
+数据将以一个4KB的Page为单位被储存在内存或者硬盘上。
 
 #### Page 结构
 一个Page将由以下的结构：
