@@ -9,10 +9,6 @@
 #include <string>
 #include <fstream>
 
-class PageInfo {
-
-};
-
 class Finder {
 public:
     Finder(std::unique_ptr<BufferManager> buffer_manager, const std::string &input_file, size_t mem_limit)
@@ -26,32 +22,34 @@ public:
         input_.open(input_file_);
     }
 
-    std::string FinderUnique() {
-        if(!input_.is_open()) return "";
+    /**
+     * Find the first unique string
+     * @return
+     */
+    std::string Process();
 
-        std::string line;
-        // Add all the words
-        while(std::getline(input_, line)) {
-            if(line == "data-5027") {
+    /**
+     * Add a word to the finder
+     * @param word
+     */
+    void AddWord(const std::string &word);
 
-            }
-            AddString(line);
-        }
-
-        // Return the first unique string
-        return GetFirstUnique();
-    }
-
-    void AddString(const std::string &word);
-
+    /**
+     * Get the first unique string from all the words
+     * @return
+     */
     std::string GetFirstUnique();
 
 private:
 
+    /**
+     * Get the page where the word should be stored at
+     * @param page_ids pages candidates in the bucket
+     * @param word word to be added
+     * @param word_id word_id to be used
+     * @return the page where the word should be added
+     */
     Page* GetTargetPage(std::vector<page_id_t> &page_ids, const std::string &word, int *word_id);
-
-    void AddToPage(const std::string &word, Page* page);
-
 
     page_id_t InitializePage();
 
@@ -61,7 +59,6 @@ private:
     std::vector<std::vector<page_id_t>> buckets_;
     size_t mem_limit_;
     size_t num_buckets_;
-    std::unordered_map<page_id_t, PageInfo> bucket_info_;
     int next_word_id_ = 1;
 };
 

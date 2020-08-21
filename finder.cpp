@@ -5,7 +5,7 @@
 #include "finder.h"
 #include <functional>
 
-void Finder::AddString(const std::string &word) {
+void Finder::AddWord(const std::string &word) {
     // Find the bucket
     auto hash = std::hash<std::string>{}(word);
     auto bucket_id = hash % num_buckets_;
@@ -13,7 +13,7 @@ void Finder::AddString(const std::string &word) {
     auto &pages = buckets_[bucket_id];
     int word_id = next_word_id_;
     auto *page = GetTargetPage(pages, word, &word_id);
-    if(word_id != next_word_id_) next_word_id_++;
+    if(word_id == next_word_id_) next_word_id_++;
 
     page->AddWord(word, word_id);
 
@@ -44,7 +44,7 @@ Page* Finder::GetTargetPage(std::vector<page_id_t> &page_ids, const std::string 
         page_ids.push_back(page_id);
     }
 
-    Page *free_page = nullptr;
+    auto free_page_id = INVALID_PAGE_ID;
     for(auto page_id : page_ids) {
         // Look for duplicates
         auto * page = buffer_->FetchPage(page_id);
@@ -53,20 +53,18 @@ Page* Finder::GetTargetPage(std::vector<page_id_t> &page_ids, const std::string 
         }
 
         // Look for page that can contain the word
-        if(free_page == nullptr && page->HasSpaceFor(word)) {
-            free_page = page;
+        if(free_page_id == INVALID_PAGE_ID && page->HasSpaceFor(word)) {
+            free_page_id = page->GetPageId();
         }
     }
 
     // No free page
-    if(free_page == nullptr) {
-        page_id_t page_id = InitializePage();
-        page_ids.push_back(page_id);
-
-        free_page = buffer_->FetchPage(page_id);
+    if(free_page_id == INVALID_PAGE_ID) {
+        free_page_id = InitializePage();
+        page_ids.push_back(free_page_id);
     }
 
-    return free_page;
+    return buffer_->FetchPage(free_page_id);
 }
 
 page_id_t Finder::InitializePage() {
@@ -74,6 +72,20 @@ page_id_t Finder::InitializePage() {
     page_id_t page_id;
     buffer_->NewPage(&page_id);
 
-    // TODO(PageInfo)
     return page_id;
+}
+
+
+std::string Finder::Process() {
+    if(!input_.is_open()) return "";
+
+    std::string line;
+    // Add all the words
+    while(std::getline(input_, line)) {
+        AddWord(line);
+    }
+
+    // Return the first unique string
+    return GetFirstUnique();
+
 }

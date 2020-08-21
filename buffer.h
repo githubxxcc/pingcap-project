@@ -96,92 +96,71 @@ public:
      * Get the first unique word in the Page
      * @return
      */
-    std::pair<std::string, int> GetMinUnique() {
-        std::string min_unique;
-        int min_unique_id = INT_MAX;
+    std::pair<std::string, int> GetMinUnique();
 
-        auto size_offset = GetWordSizeOffset();
-        for(size_t i = 0; i < num_word_ ; i++) {
-            auto offset = size_offset[i];
-            auto word_size = GetWordSizeAtOffset(i, size_offset);
-            std::pair<std::string, int> str_id = GetWordWithId(offset, word_size);
-            if(str_id.second >= 0 && str_id.second < min_unique_id) {
-                min_unique_id = str_id.second;
-                min_unique = str_id.first;
-            }
-        }
-
-        return {min_unique, min_unique_id};
-    }
-
+    /**
+     * Initialize a page by setting the page id
+     * @param page_id
+     */
     void InitializePage(page_id_t page_id) {
         page_id_ = page_id;
     }
 
     page_id_t GetPageId() const { return page_id_;}
 
-    bool HasLine(const std::string &word, int *word_id_ptr, size_t * offset_ptr = nullptr) {
+    /**
+     * Check if a line(word) has existed in the page
+     * @param word word to check
+     * @param word_id_ptr the id of the word to be set if word present
+     * @param offset_ptr  the offset of the word if word present
+     * @return if the word exists
+     */
+    bool HasLine(const std::string &word, int *word_id_ptr, size_t * offset_ptr = nullptr);
 
-        auto size_offset = GetWordSizeOffset();
-        for(size_t i = 0; i < num_word_ ; i++) {
-            auto offset = size_offset[i];
-            auto word_size = GetWordSizeAtOffset(i, size_offset);
-            if(word_size > 10000) {
-
-            }
-            std::pair<std::string, int> str_id = GetWordWithId(offset, word_size);
-            if(str_id.first == word) {
-                if(word_id_ptr != nullptr)
-                    *word_id_ptr = abs(str_id.second);
-
-                if(offset_ptr != nullptr)
-                    *offset_ptr = offset;
-
-                return true;
-            }
-        }
-
-        return false;
-    }
-
+    /**
+     * If there is enough space to store the word and its relevant information in the page
+     * @param word
+     * @return
+     */
     bool HasSpaceFor(const std::string &word) {
-        size_t word_size = word.size();
-        if((word_size + sizeof(int) + sizeof(size_t) + size_occupied_) > PAGE_SIZE) {
+        assert(next_word_end_ >= sizeof(int) + word.size());
+        auto next_word_offset = next_word_end_ - sizeof(int) - word.size();
+        auto next_size_offset = next_size_offset_ + sizeof(size_t);
+        if(next_word_offset <= next_size_offset) {
             return false;
         }
         return true;
     }
 
-    void AddWord(const std::string &word, int word_id) {
-        size_t offset;
-        if(HasLine(word, nullptr, &offset)) {
-            // Has the word, just change the word_id to negative
-            SetWordId(offset, word.size(), 0-abs(word_id));
-        } else {
-            // No word present, add the new word
-            assert(next_word_end_ >= word.size() + sizeof(int));
-            auto offset = next_word_end_ - word.size() - sizeof(int);
-            memcpy(data_+offset,word.c_str(), word.size());
-            memcpy(data_+offset+word.size(), &word_id, sizeof(int));
-
-            size_occupied_ += sizeof(int) + word.size() + sizeof(size_t);
-            auto* size_offset = GetWordSizeOffset();
-            size_offset[num_word_] = offset;
-            num_word_++;
-            next_word_end_ = offset;
-        }
-    }
+    /**
+     * Add a word to the page with word_id. It makes the word_id negative to indicate the
+     * word is no longer unique
+     * @param word
+     * @param word_id
+     */
+    void AddWord(const std::string &word, int word_id);
 
     inline size_t GetNumWord() const { return num_word_;}
 
     inline size_t GetNextWordEnd() const {return next_word_end_;}
 
 private:
+    /**
+     * Get the posistion where word offsets are stored
+     * @return
+     */
     inline size_t * GetWordSizeOffset() {
         return reinterpret_cast<size_t*>(data_);
     }
 
+    /**
+     * Get the word and its word_id
+     * @param offset
+     * @param word_size
+     * @return
+     */
     inline std::pair<std::string, int> GetWordWithId(size_t offset, size_t word_size) {
+
         std::string word(data_ + offset, word_size);
         int word_id = *(reinterpret_cast<int*>(data_ + offset + word_size));
 
@@ -193,23 +172,30 @@ private:
         *word_id_ptr = word_id;
     }
 
-
+    /**
+     * Compute the word's size based on its offset and its next word's offset
+     * @param i current word index
+     * @param size_offset beginning of size offset array
+     * @return size of the word at the index
+     */
     inline size_t GetWordSizeAtOffset(size_t i, size_t *size_offset) {
         if(i == 0) { // First word
             return PAGE_SIZE - PAGE_HEADER_SIZE - size_offset[i] - sizeof(int);
-        } else {
-            return size_offset[i-1] - size_offset[i] - sizeof(int);
         }
+        return size_offset[i-1] - size_offset[i] - sizeof(int);
     }
 
-    size_t size_occupied_ = PAGE_HEADER_SIZE;
     size_t num_word_ = 0;
+    size_t next_size_offset_ = PAGE_HEADER_SIZE;
     size_t next_word_end_ = PAGE_SIZE - PAGE_HEADER_SIZE;
     page_id_t  page_id_ = INVALID_PAGE_ID;
 
     char data_[PAGE_SIZE - PAGE_HEADER_SIZE]{};
 };
 
+/**
+ * A LRU page replacer
+ */
 class Replacer {
 public:
     Replacer() {}
@@ -243,6 +229,9 @@ private:
     std::list<page_id_t> lru_list_;
 };
 
+/**
+ * Buffer Pages Manager
+ */
 class BufferManager {
 public:
     BufferManager(size_t page_num = 2)
@@ -256,71 +245,27 @@ public:
     }
 
     /**
-     * Fetch a page from the disk
+     * Fetch a page from the disk/memory
      * @param pageid
      * @return
      */
-    Page* FetchPage(page_id_t page_id) {
-        if(data_.count(page_id)) {
-           // In memory
-           replacer_.TouchPage(page_id);
-           return data_.at(page_id);
-        }
+    Page* FetchPage(page_id_t page_id);
 
-        // On disk
-        assert(page_map_.count(page_id));
-        auto offset = page_map_.at(page_id);
-
-        // Evict a page if memory full
-        if(data_.size() == max_page_num_) {
-            EvictPage();
-        }
-        assert(data_.size() < max_page_num_);
-
-        // Read the page
-        auto *new_page = new Page();
-        disk_.ReadPage(new_page, offset);
-        data_.insert({new_page->GetPageId(), new_page});
-        replacer_.AddPage(new_page->GetPageId());
-
-        return new_page;
-    }
-
-    void NewPage(page_id_t *page_id_ptr) {
-        if(data_.size() == max_page_num_) {
-            EvictPage();
-        }
-
-        Page * new_page = new Page();
-        *page_id_ptr = next_page_id_;
-        data_.insert({next_page_id_, new_page});
-        new_page->InitializePage(next_page_id_);
-
-        replacer_.AddPage(new_page->GetPageId());
-
-        // Reserve place on the disk
-        auto offset = disk_.AllocatePage();
-        page_map_.insert({next_page_id_, offset});
-
-        next_page_id_++;
-    }
+    /**
+     * Create a new page on the disk
+     * @param page_id_ptr
+     */
+    void NewPage(page_id_t *page_id_ptr);
 
     std::unordered_map<page_id_t, Page*> GetInMemoryPages() const {return data_;}
 
     std::unordered_map<page_id_t , size_t> GetOffsetMap() const {return page_map_;}
 
 private:
-    void EvictPage() {
-        auto evict_page_id = replacer_.EvictPage();
-        assert(data_.count(evict_page_id));
-
-        auto* page = data_.at(evict_page_id);
-        disk_.WritePage(page, page_map_.at(evict_page_id));
-
-        // Clear the in-memory
-        delete page;
-        data_.erase(evict_page_id);
-    }
+    /**
+     * Evict a page from the buffer
+     */
+    void EvictPage();
 
     // In-memory pages
     std::unordered_map<page_id_t, Page*> data_;

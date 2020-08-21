@@ -65,19 +65,13 @@ class FinderTest : public ::testing::Test
 TEST_F(FinderTest, test_add) {
     auto buffer = std::make_unique<BufferManager>();
     Finder finder = Finder(std::move(buffer), "test.txt", 8 * 1024);
-    EXPECT_NO_THROW(finder.AddString("ping-cap"));
+    EXPECT_NO_THROW(finder.AddWord("ping-cap"));
 
-    EXPECT_NO_THROW(finder.AddString("ping-cap1"));
-    EXPECT_NO_THROW(finder.AddString("ping-cap"));
-    EXPECT_NO_THROW(finder.AddString("ping-cap2"));
+    EXPECT_NO_THROW(finder.AddWord("ping-cap1"));
+    EXPECT_NO_THROW(finder.AddWord("ping-cap"));
+    EXPECT_NO_THROW(finder.AddWord("ping-cap2"));
 
     EXPECT_EQ(finder.GetFirstUnique(), "ping-cap1");
-}
-
-TEST_F(FinderTest, test_file) {
-    auto buffer = std::make_unique<BufferManager>(80*1024/PAGE_SIZE);
-    Finder finder(std::move(buffer), "/Users/chenxu/CLionProjects/pingcap-interview/test.txt", 80*1024);
-    EXPECT_NO_FATAL_FAILURE(finder.FinderUnique());
 }
 
 class ReplacerTest: public ::testing::Test {};
