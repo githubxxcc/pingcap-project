@@ -1,4 +1,4 @@
-# pingcap-inter-project
+# pingcap-project
 
 ### Build 
 ```
