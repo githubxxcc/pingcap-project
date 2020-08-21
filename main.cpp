@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include "buffer.h"
+#include "finder.h"
 
 int main(int argc, char *argv[])
 {
@@ -14,7 +15,10 @@ int main(int argc, char *argv[])
     std::string input_file(argv[1]);
 
     // TODO(CHECK FILE)
-    auto page_buffers = std::unique_ptr<BufferManager>();
+    size_t mem_limit = 80*1024; // 80KB
+    auto page_buffers = std::make_unique<BufferManager>(mem_limit/PAGE_SIZE);
+    Finder finder(std::move(page_buffers), input_file, mem_limit); // 16Kb
+    std::cout << "First Unique String: " << finder.FinderUnique() << std::endl;
 
     return 0;
 }

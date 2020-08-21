@@ -1,45 +1,101 @@
 //
+// This file contains the interface between memory and disk
 // Created by Chen Xu on 8/19/20.
 //
+
 #include <vector>
+#include <fstream>
+#include <iostream>
 #include <unordered_map>
-#include <atomic>
 #include <list>
 #include <string>
 
 #ifndef PINGCAP_INTERVIEW_BUFFER_H
 #define PINGCAP_INTERVIEW_BUFFER_H
 
+class Page;
+class Disk;
+class Replacer;
+class BufferManager;
+
 using page_id_t = uint16_t;
 using offset_t = size_t;
+
 const size_t PAGE_SIZE = 4 * 1024; // 4Kb
-const size_t MAX_WORD_SIZE_PAGE = 32; // 32b
+const size_t PAGE_HEADER_SIZE = sizeof(page_id_t) + sizeof(size_t) *3;
 const page_id_t INVALID_PAGE_ID = 0;
 
-//class Disk {
-//public:
-//    Disk(const std::string &disk_file) {
-//
-//    }
-//
-//private:
-//    std::fstream io_;
-//    std::string file_name_;
-//};
+/**
+ * Disk that stores pages continuously on disk
+ */
+class Disk {
+public:
+    Disk(const std::string &disk_file) {
+        io_.open(disk_file, std::fstream::in | std::fstream::out | std::fstream::binary | std::fstream::trunc);
+        assert(io_.is_open());
+    }
+
+    ~Disk() {
+        io_.close();
+    }
+
+    /**
+     * Write a page's data to disk file at the offset
+     * @param page
+     * @param offset
+     */
+    void WritePage(const Page* page, size_t offset) {
+        io_.seekp(offset);
+        io_.write(reinterpret_cast<const char*>(page), PAGE_SIZE);
+        io_.flush();
+    }
+
+    /**
+     * Read a page from disk to memory at the offset
+     * @param page
+     * @param offset
+     */
+    void ReadPage(Page* page, size_t offset) {
+        io_.seekg(offset);
+        io_.read(reinterpret_cast<char*>(page), PAGE_SIZE);
+    }
+
+    /**
+     * Allocate a new page on disk
+     * @return the offset where the page is stored on the disk-file
+     */
+    size_t AllocatePage() {
+        auto offset = next_offset_;
+        next_offset_ += PAGE_SIZE;
+        return offset;
+    }
+
+private:
+    // file stream for read and write
+    std::fstream io_;
+    size_t next_offset_ = 0;
+};
+
+
+
 
 /**
  * Block that represents a page to store data
+ * Page has the structure:
+ * Page: [ PAGE_HEADER | DATA ]
+ * For the data portion:
+ * [ word1_offset | word2_offset | ... word2 + word_id | word1 + wordid ]
  */
-
-const size_t PAGE_HEADER_SIZE = sizeof(page_id_t) + sizeof(size_t) *3;
-
-
 class Page {
 public:
     Page() {
         memset(data_, 0, PAGE_SIZE - PAGE_HEADER_SIZE);
     }
 
+    /**
+     * Get the first unique word in the Page
+     * @return
+     */
     std::pair<std::string, int> GetMinUnique() {
         std::string min_unique;
         int min_unique_id = INT_MAX;
@@ -62,12 +118,17 @@ public:
         page_id_ = page_id;
     }
 
+    page_id_t GetPageId() const { return page_id_;}
+
     bool HasLine(const std::string &word, int *word_id_ptr, size_t * offset_ptr = nullptr) {
 
         auto size_offset = GetWordSizeOffset();
         for(size_t i = 0; i < num_word_ ; i++) {
             auto offset = size_offset[i];
             auto word_size = GetWordSizeAtOffset(i, size_offset);
+            if(word_size > 10000) {
+
+            }
             std::pair<std::string, int> str_id = GetWordWithId(offset, word_size);
             if(str_id.first == word) {
                 if(word_id_ptr != nullptr)
@@ -85,7 +146,7 @@ public:
 
     bool HasSpaceFor(const std::string &word) {
         size_t word_size = word.size();
-        if((word_size + sizeof(int) + size_occupied_) > PAGE_SIZE) {
+        if((word_size + sizeof(int) + sizeof(size_t) + size_occupied_) > PAGE_SIZE) {
             return false;
         }
         return true;
@@ -103,7 +164,7 @@ public:
             memcpy(data_+offset,word.c_str(), word.size());
             memcpy(data_+offset+word.size(), &word_id, sizeof(int));
 
-            size_occupied_ += sizeof(int) + word.size();
+            size_occupied_ += sizeof(int) + word.size() + sizeof(size_t);
             auto* size_offset = GetWordSizeOffset();
             size_offset[num_word_] = offset;
             num_word_++;
@@ -153,12 +214,28 @@ class Replacer {
 public:
     Replacer() {}
 
-    bool AddPage(page_id_t page_id) {
-        return false;
+    void AddPage(page_id_t page_id) {
+        assert(!lru_map_.count(page_id));
+        lru_list_.push_front(page_id);
+        lru_map_.insert({page_id, lru_list_.begin()});
     }
 
     page_id_t EvictPage() {
-        return 1;
+        assert(!lru_list_.empty());
+        auto evict_page_id = lru_list_.back();
+        lru_list_.pop_back();
+        lru_map_.erase(evict_page_id);
+
+        return evict_page_id;
+    }
+
+    void TouchPage(page_id_t page_id) {
+        assert(lru_map_.count(page_id));
+        auto itr = lru_map_.at(page_id);
+        lru_list_.erase(itr);
+        lru_map_.erase(page_id);
+
+        AddPage(page_id);
     }
 
 private:
@@ -168,8 +245,8 @@ private:
 
 class BufferManager {
 public:
-    BufferManager()
-            :replacer_(){
+    BufferManager(size_t page_num = 2)
+            :replacer_(), disk_("/tmp/data.db"), max_page_num_(page_num){
     }
 
     ~BufferManager(){
@@ -184,33 +261,74 @@ public:
      * @return
      */
     Page* FetchPage(page_id_t page_id) {
-        return data_.at(page_id);
-    }
+        if(data_.count(page_id)) {
+           // In memory
+           replacer_.TouchPage(page_id);
+           return data_.at(page_id);
+        }
 
-    bool FlushPage(page_id_t page_id) {
-        return true;
+        // On disk
+        assert(page_map_.count(page_id));
+        auto offset = page_map_.at(page_id);
+
+        // Evict a page if memory full
+        if(data_.size() == max_page_num_) {
+            EvictPage();
+        }
+        assert(data_.size() < max_page_num_);
+
+        // Read the page
+        auto *new_page = new Page();
+        disk_.ReadPage(new_page, offset);
+        data_.insert({new_page->GetPageId(), new_page});
+        replacer_.AddPage(new_page->GetPageId());
+
+        return new_page;
     }
 
     void NewPage(page_id_t *page_id_ptr) {
+        if(data_.size() == max_page_num_) {
+            EvictPage();
+        }
+
         Page * new_page = new Page();
         *page_id_ptr = next_page_id_;
         data_.insert({next_page_id_, new_page});
         new_page->InitializePage(next_page_id_);
-        next_page_id_++;
 
-        // TODO(real allocation)
+        replacer_.AddPage(new_page->GetPageId());
+
+        // Reserve place on the disk
+        auto offset = disk_.AllocatePage();
+        page_map_.insert({next_page_id_, offset});
+
+        next_page_id_++;
     }
 
+    std::unordered_map<page_id_t, Page*> GetInMemoryPages() const {return data_;}
+
+    std::unordered_map<page_id_t , size_t> GetOffsetMap() const {return page_map_;}
 
 private:
+    void EvictPage() {
+        auto evict_page_id = replacer_.EvictPage();
+        assert(data_.count(evict_page_id));
 
-    // In-memmory version
+        auto* page = data_.at(evict_page_id);
+        disk_.WritePage(page, page_map_.at(evict_page_id));
+
+        // Clear the in-memory
+        delete page;
+        data_.erase(evict_page_id);
+    }
+
+    // In-memory pages
     std::unordered_map<page_id_t, Page*> data_;
-
-    std::unordered_map<page_id_t , offset_t> page_map;
-    Page *pages_;
+    std::unordered_map<page_id_t , size_t> page_map_;
     Replacer replacer_;
+    Disk disk_;
     page_id_t  next_page_id_ = 1;
+    const size_t max_page_num_;
 };
 
 #endif //PINGCAP_INTERVIEW_BUFFER_H
